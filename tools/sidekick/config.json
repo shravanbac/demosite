@@ -1,0 +1,12 @@
+{
+  "project": "Demo Site",
+  "plugins": [
+    {
+      "id": "send-review",
+      "title": "Send For Review",
+      "event": "send-for-review",
+      "pinned": true,
+      "environments": ["dev","preview","live","prod"]
+    }
+  ]
+}
