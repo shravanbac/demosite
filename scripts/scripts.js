@@ -178,27 +178,112 @@ async function loadPage() {
   }
 
   /** Build payload expected by your Fusion scenario */
- function buildPayload(ctx) {
-  // pick a live host
+function buildPayload(ctx) {
+  // Resolve live & preview hosts
   const hasRepo = Boolean(ctx.ref && ctx.site && ctx.org);
   const liveHost = hasRepo
     ? `${ctx.ref}--${ctx.site}--${ctx.org}.aem.live`
     : (ctx.host && ctx.host.endsWith('.aem.page')
         ? ctx.host.replace('.aem.page', '.aem.live')
         : ctx.host || 'localhost');
+  const previewHost = hasRepo
+    ? `${ctx.ref}--${ctx.site}--${ctx.org}.aem.page`
+    : (ctx.host || 'localhost');
 
-  // normalize path and derive name
+  // Normalize path and derive name
   const cleanPath = (ctx.path || '').replace(/^\/+/, '');
   const last = cleanPath.split('/').filter(Boolean).pop() || 'index';
   const name = last.replace(/\.[^.]+$/, '') || 'index';
 
-  return {
+  // Head helpers
+  const qMeta = (sel) => {
+    const el = document.head.querySelector(sel);
+    return el && (el.content || el.getAttribute('content')) || null;
+  };
+  const metas = (prefix) => {
+    const out = {};
+    document.head.querySelectorAll(`meta[property^="${prefix}"], meta[name^="${prefix}"]`)
+      .forEach((m) => {
+        const key = (m.getAttribute('property') || m.getAttribute('name')).replace(`${prefix}:`, '');
+        out[key] = m.getAttribute('content');
+      });
+    return Object.keys(out).length ? out : undefined;
+  };
+  const canonical = (() => {
+    const l = document.head.querySelector('link[rel="canonical"]');
+    return l ? l.href : undefined;
+  })();
+
+  // Optional headings (limit for brevity)
+  const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
+    .slice(0, 6)
+    .map(h => ({ level: h.tagName, text: h.textContent.trim() }))
+    || undefined;
+
+  // Base payload (your 4 required fields)
+  const payload = {
     title: ctx.title,
     url: `https://${liveHost}/${cleanPath}`,
     name,
     publishedDate: ctx.iso_now,
   };
+
+  // Enrich (optional but useful)
+  Object.assign(payload, {
+    // context
+    path: `/${cleanPath}`,
+    previewUrl: `https://${previewHost}/${cleanPath}`,
+    liveUrl: `https://${liveHost}/${cleanPath}`,
+    host: ctx.host,
+    env: ctx.env,
+    org: ctx.org || undefined,
+    site: ctx.site || undefined,
+    ref: ctx.ref || undefined,
+    source: 'DA.live',
+
+    // page meta
+    lang: document.documentElement.lang || undefined,
+    dir: document.documentElement.dir || undefined,
+    canonical: canonical,
+    meta: {
+      description: qMeta('meta[name="description"]'),
+      keywords: qMeta('meta[name="keywords"]'),
+      author: qMeta('meta[name="author"]'),
+      og: metas('og') || undefined,
+      twitter: metas('twitter') || undefined,
+    },
+
+    // small content preview
+    headings,
+
+    // client/audit (optional)
+    analytics: {
+      referrer: document.referrer || undefined,
+      userAgent: navigator.userAgent || undefined,
+      locale: navigator.language || undefined,
+      timezoneOffset: new Date().getTimezoneOffset(),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    },
+
+    // dedupe helper if you ever need it
+    idempotencyKey: `${cleanPath}#${ctx.iso_now}`,
+  });
+
+  // Clean out empty nested objects
+  const clean = (obj) => {
+    Object.keys(obj).forEach((k) => {
+      const v = obj[k];
+      if (v && typeof v === 'object' && !Array.isArray(v)) clean(v);
+      if (v == null || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length)) {
+        delete obj[k];
+      }
+    });
+    return obj;
+  };
+
+  return clean(payload);
 }
+
 
 
   /** Minimal POST helper (no retries). Accepts empty/JSON response. */
@@ -221,8 +306,6 @@ async function loadPage() {
   /** UI helpers */
   function setInitialLabel(btn) {
     const span = document.createElement('span');
-    span.textContent = LABEL;
-    span.style.color = LABEL_COLOR;
     btn.replaceChildren(span);
     btn.setAttribute('aria-label', LABEL);
     btn.setAttribute('title', LABEL);
