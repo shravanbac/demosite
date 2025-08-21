@@ -126,350 +126,224 @@ async function loadPage() {
   loadDelayed();
 }
 
+
+
 /* -------------------------------------------------------------------------- */
-/*                   Sidekick: Send For Review + Webhook POST                 */
+/*     Sidekick: "Send For Review" — plain POST (no TTL, no polling, no LS)   */
 /* -------------------------------------------------------------------------- */
+/*
+  Drop‑in usage
+  =============
+  - Include this IIFE after the Sidekick loads (end of your main JS is fine).
+  - It injects a "Send For Review" button before Publish and performs a
+    single POST to your Fusion webhook when clicked.
+  - No persistence, no status polling, no timers — just the POST.
 
-const WEBHOOK_URL = 'https://hook.fusion.adobe.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd';
+  Configure the webhook (first match wins):
+    1) window.__SFR_WEBHOOK_URL = "https://hook.fusion.adobe.com/xxxx";
+    2) <meta name="sfr:webhook" content="https://hook.fusion.adobe.com/xxxx">
+    3) DEFAULT_WEBHOOK below.
+*/
 
-// Disable should persist for this page while waiting.
-// If Fusion returns a statusUrl, we poll it; otherwise we auto-reset after TTL.
-const PENDING_TTL_MS = 24 * 60 * 60 * 1000;   // 24h safety valve (tweak as needed)
-const POLL_INTERVAL_MS = 5000;
-const POLL_MAX_JITTER_MS = 1500;
+(() => {
+  const DEFAULT_WEBHOOK = "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd";
+  const LABEL = "Send For Review";
+  const LABEL_COLOR = "gainsboro";
 
-/** Extract {ref, site, org, env, path, title, url, host, iso_now} */
-function getSidekickContext() {
-  const { host, pathname, href } = window.location;
-  let ref; let site; let org; let env;
-  const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
-  if (m) [, ref, site, org, env] = m;
+  /** Resolve webhook URL from global, meta, or default */
+  function resolveWebhook() {
+    if (typeof window.__SFR_WEBHOOK_URL === 'string' && window.__SFR_WEBHOOK_URL) return window.__SFR_WEBHOOK_URL;
+    const meta = document.querySelector('meta[name="sfr:webhook"]');
+    if (meta?.content) return meta.content.trim();
+    return DEFAULT_WEBHOOK;
+  }
 
-  // Fallbacks for localhost or non-standard hosts
-  const skHost = document.querySelector('aem-sidekick');
-  const sk = (window.hlx && window.hlx.sidekick)
-    || skHost?.sidekick
-    || skHost?.config
-    || {};
-  ref  = ref  || sk.ref  || sk.branch || sk.gitref  || '';
-  site = site || sk.repo || sk.site   || '';
-  org  = org  || sk.owner|| sk.org    || '';
-  env  = env  || (host.includes('.aem.live') ? 'live' : 'page');
+  /** Extract {ref, site, org, env, path, title, url, host, iso_now} */
+  function getSidekickContext() {
+    const { host, pathname, href } = window.location;
+    let ref = ""; let site = ""; let org = ""; let env = host.includes('.aem.live') ? 'live' : 'page';
+    const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
+    if (m) [, ref, site, org, env] = m;
 
-  const path = (pathname || '/').replace(/^\//, '');
-  const title = document.title || path || '/';
-  const iso_now = new Date().toISOString();
-  return { ref, site, org, env, path, title, url: href, host, iso_now };
-}
+    const skEl = document.querySelector('aem-sidekick, helix-sidekick');
+    const sk = (window.hlx && window.hlx.sidekick) || skEl?.sidekick || skEl?.config || {};
+    ref  = ref  || sk.ref  || sk.branch || sk.gitref || '';
+    site = site || sk.repo || sk.site   || '';
+    org  = org  || sk.owner|| sk.org    || '';
 
-/** Build payload (matches your current implementation) */
-function buildPayload(ctx) {
-  const liveHost = (ctx.ref && ctx.site && ctx.org)
+    const path = (pathname || '/').replace(/^\//, '');
+    const title = document.title || path || '/';
+    const iso_now = new Date().toISOString();
+    return { ref, site, org, env, path, title, url: href, host, iso_now };
+  }
+
+  /** Build payload expected by your Fusion scenario */
+ function buildPayload(ctx) {
+  // pick a live host
+  const hasRepo = Boolean(ctx.ref && ctx.site && ctx.org);
+  const liveHost = hasRepo
     ? `${ctx.ref}--${ctx.site}--${ctx.org}.aem.live`
-    : window.location.host.replace('.aem.page', '.aem.live');
+    : (ctx.host && ctx.host.endsWith('.aem.page')
+        ? ctx.host.replace('.aem.page', '.aem.live')
+        : ctx.host || 'localhost');
+
+  // normalize path and derive name
+  const cleanPath = (ctx.path || '').replace(/^\/+/, '');
+  const last = cleanPath.split('/').filter(Boolean).pop() || 'index';
+  const name = last.replace(/\.[^.]+$/, '') || 'index';
 
   return {
-    url: `https://${liveHost}/${ctx.path}`,
     title: ctx.title,
-    path: `/${ctx.path}`,
-    org: ctx.org,
-    site: ctx.site,
-    ref: ctx.ref,
-    source: 'DA.live',
-    publishedAt: ctx.iso_now,
+    url: `https://${liveHost}/${cleanPath}`,
+    name,
+    publishedDate: ctx.iso_now,
   };
 }
 
-/** POST to Fusion webhook; try to parse JSON body for {statusUrl,...} */
-async function postToWebhook(payload) {
-  const res = await fetch(WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    mode: 'cors',
-    body: JSON.stringify(payload),
-  });
-  const text = await res.text(); // body might be empty or JSON
-  let meta = null;
-  try { meta = text ? JSON.parse(text) : null; } catch (e) { /* ignore non-JSON */ }
-  if (!res.ok) {
-    const detail = (meta && (meta.message || meta.error)) || text || '';
-    throw new Error(`HTTP ${res.status}${detail ? ` – ${detail}` : ''}`);
+
+  /** Minimal POST helper (no retries). Accepts empty/JSON response. */
+  async function postToWebhook(webhook, payload) {
+    const res = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+      mode: 'cors',
+      body: JSON.stringify(payload),
+    });
+    const text = await res.text();
+    let meta = null; try { meta = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+    if (!res.ok) {
+      const detail = (meta && (meta.message || meta.error)) || text || '';
+      throw new Error(`HTTP ${res.status}${detail ? ` – ${detail}` : ''}`);
+    }
+    return meta || {};
   }
-  return meta || {};
-}
 
-/** localStorage helpers to persist "pending" per page (ref/site/org/path) */
-function storageKey(ctx) {
-  return `sfr:pending:${ctx.ref}|${ctx.site}|${ctx.org}|/${ctx.path}`;
-}
-function savePending(ctx, pending) {
-  try { localStorage.setItem(storageKey(ctx), JSON.stringify({ ...pending, t: Date.now() })); } catch (e) {}
-}
-function loadPending(ctx) {
-  try {
-    const raw = localStorage.getItem(storageKey(ctx));
-    if (!raw) return null;
-    const v = JSON.parse(raw);
-    if (!v?.t || Date.now() - v.t > PENDING_TTL_MS) {
-      localStorage.removeItem(storageKey(ctx));
-      return null;
-    }
-    return v;
-  } catch (e) { return null; }
-}
-function clearPending(ctx) {
-  try { localStorage.removeItem(storageKey(ctx)); } catch (e) {}
-}
-
-/** Ensure disabled/aria-busy + try to disable inner clickable node */
-function enforceDisabled(btn, disabled) {
-  if (disabled) {
-    btn.setAttribute('aria-busy', 'true');
-    btn.setAttribute('disabled', '');
-    btn.style.pointerEvents = 'none'; // belt & suspenders on host
-    // try to reach internal control
-    const applyInner = () => {
-      const inner = btn.shadowRoot?.querySelector('button, [part="button"], .control, .sk-button');
-      if (inner) {
-        inner.disabled = true;
-        inner.style.pointerEvents = 'none';
-        return true;
-      }
-      return false;
-    };
-    if (!applyInner()) {
-      // watch once until shadow content is ready
-      const mo = new MutationObserver(() => { if (applyInner()) mo.disconnect(); });
-      btn.shadowRoot && mo.observe(btn.shadowRoot, { childList: true, subtree: true });
-    }
-  } else {
-    btn.removeAttribute('aria-busy');
-    btn.removeAttribute('disabled');
-    btn.style.pointerEvents = '';
-    const inner = btn.shadowRoot?.querySelector('button, [part="button"], .control, .sk-button');
-    if (inner) {
-      inner.disabled = false;
-      inner.style.pointerEvents = '';
-    }
+  /** UI helpers */
+  function setInitialLabel(btn) {
+    const span = document.createElement('span');
+    span.textContent = LABEL;
+    span.style.color = LABEL_COLOR;
+    btn.replaceChildren(span);
+    btn.setAttribute('aria-label', LABEL);
+    btn.setAttribute('title', LABEL);
   }
-}
 
-/** Poll Fusion status URL (if provided). Label never changes; only enable on reject/timeout. */
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-async function pollApproval({ statusUrl, btn, ctx }) {
-  if (!statusUrl) return; // nothing to poll; pending TTL keeps it disabled
-
-  const startedAt = Date.now();
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    try {
-      const r = await fetch(statusUrl, { method: 'GET', mode: 'cors' });
-      const txt = await r.text();
-      let data = null;
-      try { data = txt ? JSON.parse(txt) : null; } catch (e) { /* ignore */ }
-      const status = (data && (data.status || data.State || data.result)) || '';
-
-      if (/approved/i.test(status)) {
-        clearPending(ctx);
-        // keep disabled on approval
-        return;
-      }
-      if (/rejected|declined|failed/i.test(status)) {
-        enforceDisabled(btn, false);
-        clearPending(ctx);
-        return;
-      }
-    } catch (e) {
-      // transient error, keep waiting
-    }
-
-    // safety timeout
-    if (Date.now() - startedAt > PENDING_TTL_MS) {
-      enforceDisabled(btn, false);
-      clearPending(ctx);
-      return;
-    }
-
-    const jitter = Math.floor(Math.random() * POLL_MAX_JITTER_MS);
-    await delay(POLL_INTERVAL_MS + jitter);
+  function locate(root) {
+    const barEl = root.querySelector('plugin-action-bar');
+    const barSR = barEl && barEl.shadowRoot;
+    const publish = barSR && barSR.querySelector('sk-action-button.publish');
+    const group = barSR && (barSR.querySelector('.action-group.plugins-container') || publish?.parentNode || barSR);
+    return { barSR, publish, group };
   }
-}
 
-/** Add "Send For Review" before Publish and wire the click */
-(function sidekickSendForReview() {
-  const LABEL = 'Send For Review';
-  const LABEL_COLOR = 'gainsboro';
-  const log = (...a) => console.log('[SFR]', ...a);
+  function ensureButton(root) {
+    const { barSR, publish, group } = locate(root);
+    if (!barSR || !group) return null;
+    const existing = barSR.querySelector('sk-action-button.send-review');
+    if (existing) return existing;
+
+    // Prefer real constructor for exact styling
+    const Ctor = customElements.get('sk-action-button');
+    if (Ctor) {
+      try {
+        const btn = new Ctor();
+        btn.classList.add('send-review');
+        btn.dataset.action = 'send-for-review';
+        if (publish) {
+          [...publish.attributes].forEach(({ name, value }) => {
+            if (!['class', 'title', 'aria-label'].includes(name)) btn.setAttribute(name, value);
+          });
+        } else {
+          btn.setAttribute('quiet', ''); btn.setAttribute('dir', 'ltr'); btn.setAttribute('role', 'button'); btn.setAttribute('tabindex', '0');
+        }
+        setInitialLabel(btn);
+        (publish?.parentNode || group).insertBefore(btn, publish || null);
+        return btn;
+      } catch {}
+    }
+
+    // Fallback: clone Publish
+    if (publish) {
+      const clone = publish.cloneNode(true);
+      clone.classList.remove('publish', 'reload', 'edit');
+      clone.classList.add('send-review');
+      clone.dataset.action = 'send-for-review';
+      clone.removeAttribute('disabled');
+      clone.removeAttribute('aria-busy');
+      setInitialLabel(clone);
+      publish.parentNode.insertBefore(clone, publish);
+      return clone;
+    }
+
+    // Fallback: create element
+    const el = document.createElement('sk-action-button');
+    el.classList.add('send-review');
+    el.dataset.action = 'send-for-review';
+    el.setAttribute('quiet', ''); el.setAttribute('dir', 'ltr'); el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
+    setInitialLabel(el);
+    group.insertBefore(el, publish || null);
+    return el;
+  }
+
+  function getHost() { return document.querySelector('aem-sidekick, helix-sidekick'); }
 
   function attach() {
-    const host = document.querySelector('aem-sidekick');
+    const host = getHost();
     const root = host && host.shadowRoot;
     if (!root) return;
 
-    // Delegated click handler -> POST + disable (per page) until approval
+    // One-time delegated click handler inside the shadow root
     if (!root.__sfrDelegation) {
       root.__sfrDelegation = true;
       root.addEventListener('click', async (e) => {
-        const hit = (e.composedPath?.() || []).find(
-          (el) => el?.tagName === 'SK-ACTION-BUTTON' && el.classList?.contains('send-review'),
-        );
+        const path = (e.composedPath && e.composedPath()) || [];
+        const hit = path.find((el) => el?.tagName === 'SK-ACTION-BUTTON' && el.classList?.contains('send-review'));
         if (!hit) return;
+        if (hit.hasAttribute('aria-busy')) return; // avoid double-clicks during in-flight
 
-        // if already disabled (pending), ignore
-        if (hit.hasAttribute('disabled')) return;
-
+        const webhook = resolveWebhook();
         const ctx = getSidekickContext();
-        try {
-          enforceDisabled(hit, true); // disable, keep label text
-          const payload = buildPayload(ctx);
-          const meta = await postToWebhook(payload);
+        const payload = buildPayload(ctx);
 
-          // Persist "pending" for this page and start polling if possible
-          const statusUrl = meta?.statusUrl || meta?.status_url || meta?.statusURL || null;
-          savePending(ctx, { status: 'pending', statusUrl });
-          if (statusUrl) {
-            pollApproval({ statusUrl, btn: hit, ctx }).catch(() => {});
-          }
-          alert('Review request submitted ✅');
+        // Minimal in-flight feedback (no persistence)
+        hit.setAttribute('aria-busy', 'true');
+        hit.setAttribute('disabled', '');
+        try {
+          await postToWebhook(webhook, payload);
+          alert('Review request submitted.');
         } catch (err) {
           console.error('[SFR] webhook failed:', err);
           alert(`Send For Review failed: ${err.message}`);
-          enforceDisabled(hit, false); // re-enable on failure
+        } finally {
+          hit.removeAttribute('aria-busy');
+          hit.removeAttribute('disabled');
         }
       }, { capture: true });
-      log('delegation attached');
     }
 
-    const locate = () => {
-      const barEl = root.querySelector('plugin-action-bar');
-      const barSR = barEl && barEl.shadowRoot;
-      const publish = barSR && barSR.querySelector('sk-action-button.publish');
-      const group = barSR && (barSR.querySelector('.action-group.plugins-container') || publish?.parentNode);
-      return { barSR, publish, group };
-    };
-
-    // visible label via a slotted node so color applies
-    const setInitialLabel = (btn) => {
-      const span = document.createElement('span');
-      span.textContent = LABEL;
-      span.style.color = LABEL_COLOR;
-      btn.replaceChildren(span);
-      btn.setAttribute('aria-label', LABEL);
-      btn.setAttribute('title', LABEL);
-    };
-
-    const ensureButton = () => {
-      const { barSR, publish, group } = locate();
-      if (!barSR || !group) return false;
-      if (barSR.querySelector('sk-action-button.send-review')) return true;
-
-      // Attempt 1: real constructor (best styling)
-      const Ctor = customElements.get('sk-action-button');
-      if (Ctor) {
-        try {
-          const btn = new Ctor();
-          btn.classList.add('send-review');
-          // copy useful attrs from Publish for spacing/behavior
-          if (publish) {
-            [...publish.attributes].forEach(({ name, value }) => {
-              if (!['class', 'title', 'aria-label'].includes(name)) btn.setAttribute(name, value);
-            });
-          } else {
-            btn.setAttribute('quiet', '');
-            btn.setAttribute('dir', 'ltr');
-            btn.setAttribute('role', 'button');
-            btn.setAttribute('tabindex', '0');
-          }
-          setInitialLabel(btn);
-          (publish?.parentNode || group).insertBefore(btn, publish || null); // BEFORE Publish
-          log('button inserted (ctor)');
-          return true;
-        } catch (e) { log('ctor failed:', e.message); }
-      }
-
-      // Attempt 2: clone Publish (inherits exact look)
-      if (publish) {
-        const clone = publish.cloneNode(true);
-        clone.classList.remove('publish', 'reload', 'edit');
-        clone.classList.add('send-review');
-        clone.removeAttribute('disabled'); clone.removeAttribute('aria-busy');
-        setInitialLabel(clone);
-        publish.parentNode.insertBefore(clone, publish); // BEFORE Publish
-        log('button inserted (clone)');
-        return true;
-      }
-
-      // Attempt 3: createElement fallback
-      const el = document.createElement('sk-action-button');
-      el.classList.add('send-review');
-      el.setAttribute('quiet', ''); el.setAttribute('dir', 'ltr');
-      el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
-      setInitialLabel(el);
-      group.insertBefore(el, publish || null);
-      log('button inserted (createElement)');
-      return true;
-    };
-
-    // Try now; if not ready, watch for renders and CE upgrade
-    let inserted = ensureButton();
-    if (!inserted) {
+    // Insert button now or when the bar renders
+    let btn = ensureButton(root);
+    if (!btn) {
       if (!customElements.get('sk-action-button')) {
-        customElements.whenDefined('sk-action-button').then(() => inserted || (inserted = ensureButton()));
+        customElements.whenDefined('sk-action-button').then(() => { btn = btn || ensureButton(root); });
       }
-      const mo = new MutationObserver(() => {
-        inserted || (inserted = ensureButton());
-        if (inserted) mo.disconnect();
-      });
+      const mo = new MutationObserver(() => { btn = btn || ensureButton(root); if (btn) mo.disconnect(); });
       mo.observe(root, { childList: true, subtree: true });
-      log('waiting for action bar…');
-    }
-
-    // Rehydrate "pending" for this page and enforce disabled on load
-    const ctx = getSidekickContext();
-    const pending = loadPending(ctx);
-    if (pending && root.querySelector('plugin-action-bar')?.shadowRoot) {
-      const barSR = root.querySelector('plugin-action-bar').shadowRoot;
-      const btn = barSR.querySelector('sk-action-button.send-review');
-      if (btn) {
-        enforceDisabled(btn, true);
-        if (pending.statusUrl) {
-          pollApproval({ statusUrl: pending.statusUrl, btn, ctx }).catch(() => {});
-        } else {
-          // No status URL; auto-reset after TTL if still pending
-          setTimeout(() => {
-            const still = loadPending(ctx);
-            if (still) {
-              enforceDisabled(btn, false);
-              clearPending(ctx);
-            }
-          }, Math.max(0, pending.t + PENDING_TTL_MS - Date.now()));
-        }
-      }
-    }
-
-    // Keep it across Lit re-renders (reinsert + reapply disabled if pending)
-    const { barSR } = locate();
-    if (barSR && !barSR.__sfrPersist) {
-      barSR.__sfrPersist = true;
-      new MutationObserver(() => {
-        const btn = barSR.querySelector('sk-action-button.send-review');
-        if (!btn) {
-          ensureButton();
-        } else {
-          const p = loadPending(getSidekickContext());
-          if (p) enforceDisabled(btn, true);
-        }
-      }).observe(barSR, { childList: true, subtree: true });
-      log('persistence on');
     }
   }
 
-  if (document.querySelector('aem-sidekick')) attach();
-  document.addEventListener('sidekick-ready', attach);
-  document.addEventListener('helix-sidekick-ready', attach);
-  customElements.whenDefined?.('aem-sidekick').then(attach);
+  // Attach now and on readiness events
+  if (getHost()) attach();
+  ['sidekick-ready', 'helix-sidekick-ready'].forEach((ev) => document.addEventListener(ev, attach));
+  if (customElements.whenDefined) {
+    customElements.whenDefined('aem-sidekick').then(attach).catch(() => {});
+    if (customElements.get('helix-sidekick')) customElements.whenDefined('helix-sidekick').then(attach).catch(() => {});
+  }
 })();
 
-/* -------------------------------------------------------------------------- */
+
+
+
+
 
 loadPage();
