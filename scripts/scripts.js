@@ -130,7 +130,7 @@ async function loadPage() {
 /*                   Sidekick: Send For Review + Webhook POST                 */
 /* -------------------------------------------------------------------------- */
 
-const WEBHOOK_URL = 'https://hook.fusion.adobe.com/vko85v1ph298ozoqj63vg2k6swj9wgj3';
+const WEBHOOK_URL = 'https://hook.fusion.adobe.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd';
 
 // Disable should persist for this page while waiting.
 // If Fusion returns a statusUrl, we poll it; otherwise we auto-reset after TTL.
