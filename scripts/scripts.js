@@ -127,12 +127,11 @@ async function loadPage() {
 }
 
 
-
 /* -------------------------------------------------------------------------- */
 /*     Sidekick: "Send For Review" — plain POST (no TTL, no polling, no LS)   */
 /* -------------------------------------------------------------------------- */
 /*
-  Drop‑in usage
+  Drop-in usage
   =============
   - Include this IIFE after the Sidekick loads (end of your main JS is fine).
   - It injects a "Send For Review" button before Publish and performs a
@@ -148,145 +147,122 @@ async function loadPage() {
 (() => {
   const DEFAULT_WEBHOOK = "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd";
   const LABEL = "Send For Review";
-  const LABEL_COLOR = "gainsboro";
 
   /** Resolve webhook URL from global, meta, or default */
-  function resolveWebhook() {
-    if (typeof window.__SFR_WEBHOOK_URL === 'string' && window.__SFR_WEBHOOK_URL) return window.__SFR_WEBHOOK_URL;
-    const meta = document.querySelector('meta[name="sfr:webhook"]');
-    if (meta?.content) return meta.content.trim();
-    return DEFAULT_WEBHOOK;
-  }
+  const resolveWebhook = () =>
+    (typeof window.__SFR_WEBHOOK_URL === 'string' && window.__SFR_WEBHOOK_URL)
+      || document.querySelector('meta[name="sfr:webhook"]')?.content?.trim()
+      || DEFAULT_WEBHOOK;
 
-  /** Extract {ref, site, org, env, path, title, url, host, iso_now} */
+  /** Extract context from Sidekick and location */
   function getSidekickContext() {
     const { host, pathname, href } = window.location;
-    let ref = ""; let site = ""; let org = ""; let env = host.includes('.aem.live') ? 'live' : 'page';
-    const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
-    if (m) [, ref, site, org, env] = m;
+    let [ref = "", site = "", org = "", env = host.includes('.aem.live') ? 'live' : 'page'] =
+      host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/) || [];
 
-    const skEl = document.querySelector('aem-sidekick, helix-sidekick');
-    const sk = (window.hlx && window.hlx.sidekick) || skEl?.sidekick || skEl?.config || {};
-    ref  = ref  || sk.ref  || sk.branch || sk.gitref || '';
-    site = site || sk.repo || sk.site   || '';
-    org  = org  || sk.owner|| sk.org    || '';
+    const sk = (window.hlx?.sidekick)
+      || document.querySelector('aem-sidekick, helix-sidekick')?.sidekick
+      || {};
 
-    const path = (pathname || '/').replace(/^\//, '');
-    const title = document.title || path || '/';
-    const iso_now = new Date().toISOString();
-    return { ref, site, org, env, path, title, url: href, host, iso_now };
+    ref  ||= sk.ref  || sk.branch || sk.gitref || '';
+    site ||= sk.repo || sk.site   || '';
+    org  ||= sk.owner|| sk.org    || '';
+
+    return {
+      ref, site, org, env,
+      path: (pathname || '/').replace(/^\//, ''),
+      title: document.title || pathname || '/',
+      url: href,
+      host,
+      iso_now: new Date().toISOString()
+    };
   }
 
-  /** Build payload expected by your Fusion scenario */
-function buildPayload(ctx) {
-  // Resolve live & preview hosts
-  const hasRepo = Boolean(ctx.ref && ctx.site && ctx.org);
-  const liveHost = hasRepo
-    ? `${ctx.ref}--${ctx.site}--${ctx.org}.aem.live`
-    : (ctx.host && ctx.host.endsWith('.aem.page')
-        ? ctx.host.replace('.aem.page', '.aem.live')
-        : ctx.host || 'localhost');
-  const previewHost = hasRepo
-    ? `${ctx.ref}--${ctx.site}--${ctx.org}.aem.page`
-    : (ctx.host || 'localhost');
+  /** Build payload expected by Fusion */
+  function buildPayload(ctx) {
+    const { ref, site, org, host, path, iso_now } = ctx;
+    const hasRepo = ref && site && org;
+    const cleanPath = path.replace(/^\/+/, '');
+    const name = (cleanPath.split('/').filter(Boolean).pop() || 'index').replace(/\.[^.]+$/, '') || 'index';
 
-  // Normalize path and derive name
-  const cleanPath = (ctx.path || '').replace(/^\/+/, '');
-  const last = cleanPath.split('/').filter(Boolean).pop() || 'index';
-  const name = last.replace(/\.[^.]+$/, '') || 'index';
+    const liveHost = hasRepo
+      ? `${ref}--${site}--${org}.aem.live`
+      : host?.endsWith('.aem.page') ? host.replace('.aem.page', '.aem.live') : host || 'localhost';
 
-  // Head helpers
-  const qMeta = (sel) => {
-    const el = document.head.querySelector(sel);
-    return el && (el.content || el.getAttribute('content')) || null;
-  };
-  const metas = (prefix) => {
-    const out = {};
-    document.head.querySelectorAll(`meta[property^="${prefix}"], meta[name^="${prefix}"]`)
-      .forEach((m) => {
-        const key = (m.getAttribute('property') || m.getAttribute('name')).replace(`${prefix}:`, '');
-        out[key] = m.getAttribute('content');
+    const previewHost = hasRepo
+      ? `${ref}--${site}--${org}.aem.page`
+      : host || 'localhost';
+
+    const qMeta = (sel) => document.head.querySelector(sel)?.content || null;
+    const metas = (prefix) => {
+      const out = {};
+      document.head.querySelectorAll(`meta[property^="${prefix}"], meta[name^="${prefix}"]`)
+        .forEach((m) => {
+          const key = (m.getAttribute('property') || m.getAttribute('name')).replace(`${prefix}:`, '');
+          out[key] = m.content;
+        });
+      return Object.keys(out).length ? out : undefined;
+    };
+
+    const payload = {
+      // required
+      title: ctx.title,
+      url: `https://${liveHost}/${cleanPath}`,
+      name,
+      publishedDate: iso_now,
+
+      // context
+      path: `/${cleanPath}`,
+      previewUrl: `https://${previewHost}/${cleanPath}`,
+      liveUrl: `https://${liveHost}/${cleanPath}`,
+      host, env: ctx.env, org, site, ref,
+      source: 'DA.live',
+
+      // page meta
+      lang: document.documentElement.lang || undefined,
+      dir: document.documentElement.dir || undefined,
+      canonical: document.querySelector('link[rel="canonical"]')?.href,
+      meta: {
+        description: qMeta('meta[name="description"]'),
+        keywords: qMeta('meta[name="keywords"]'),
+        author: qMeta('meta[name="author"]'),
+        og: metas('og'),
+        twitter: metas('twitter'),
+      },
+
+      // content preview
+      headings: Array.from(document.querySelectorAll('h1, h2, h3'))
+        .slice(0, 6)
+        .map(h => ({ level: h.tagName, text: h.textContent.trim() })) || undefined,
+
+      // audit info
+      analytics: {
+        referrer: document.referrer || undefined,
+        userAgent: navigator.userAgent || undefined,
+        locale: navigator.language || undefined,
+        timezoneOffset: new Date().getTimezoneOffset(),
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      },
+
+      idempotencyKey: `${cleanPath}#${iso_now}`,
+    };
+
+    // prune empty objects
+    const prune = (obj) => {
+      Object.keys(obj).forEach((k) => {
+        const v = obj[k];
+        if (v && typeof v === 'object' && !Array.isArray(v)) prune(v);
+        if (v == null || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length)) {
+          delete obj[k];
+        }
       });
-    return Object.keys(out).length ? out : undefined;
-  };
-  const canonical = (() => {
-    const l = document.head.querySelector('link[rel="canonical"]');
-    return l ? l.href : undefined;
-  })();
+      return obj;
+    };
 
-  // Optional headings (limit for brevity)
-  const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-    .slice(0, 6)
-    .map(h => ({ level: h.tagName, text: h.textContent.trim() }))
-    || undefined;
+    return prune(payload);
+  }
 
-  // Base payload (your 4 required fields)
-  const payload = {
-    title: ctx.title,
-    url: `https://${liveHost}/${cleanPath}`,
-    name,
-    publishedDate: ctx.iso_now,
-  };
-
-  // Enrich (optional but useful)
-  Object.assign(payload, {
-    // context
-    path: `/${cleanPath}`,
-    previewUrl: `https://${previewHost}/${cleanPath}`,
-    liveUrl: `https://${liveHost}/${cleanPath}`,
-    host: ctx.host,
-    env: ctx.env,
-    org: ctx.org || undefined,
-    site: ctx.site || undefined,
-    ref: ctx.ref || undefined,
-    source: 'DA.live',
-
-    // page meta
-    lang: document.documentElement.lang || undefined,
-    dir: document.documentElement.dir || undefined,
-    canonical: canonical,
-    meta: {
-      description: qMeta('meta[name="description"]'),
-      keywords: qMeta('meta[name="keywords"]'),
-      author: qMeta('meta[name="author"]'),
-      og: metas('og') || undefined,
-      twitter: metas('twitter') || undefined,
-    },
-
-    // small content preview
-    headings,
-
-    // client/audit (optional)
-    analytics: {
-      referrer: document.referrer || undefined,
-      userAgent: navigator.userAgent || undefined,
-      locale: navigator.language || undefined,
-      timezoneOffset: new Date().getTimezoneOffset(),
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-    },
-
-    // dedupe helper if you ever need it
-    idempotencyKey: `${cleanPath}#${ctx.iso_now}`,
-  });
-
-  // Clean out empty nested objects
-  const clean = (obj) => {
-    Object.keys(obj).forEach((k) => {
-      const v = obj[k];
-      if (v && typeof v === 'object' && !Array.isArray(v)) clean(v);
-      if (v == null || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length)) {
-        delete obj[k];
-      }
-    });
-    return obj;
-  };
-
-  return clean(payload);
-}
-
-
-
-  /** Minimal POST helper (no retries). Accepts empty/JSON response. */
+  /** POST helper */
   async function postToWebhook(webhook, payload) {
     const res = await fetch(webhook, {
       method: 'POST',
@@ -295,104 +271,65 @@ function buildPayload(ctx) {
       body: JSON.stringify(payload),
     });
     const text = await res.text();
-    let meta = null; try { meta = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+    let meta; try { meta = text ? JSON.parse(text) : null; } catch {}
     if (!res.ok) {
-      const detail = (meta && (meta.message || meta.error)) || text || '';
-      throw new Error(`HTTP ${res.status}${detail ? ` – ${detail}` : ''}`);
+      throw new Error(`HTTP ${res.status}${meta?.message ? ` – ${meta.message}` : text ? ` – ${text}` : ''}`);
     }
     return meta || {};
   }
 
   /** UI helpers */
-  function setInitialLabel(btn) {
-    const span = document.createElement('span');
-    btn.replaceChildren(span);
+  const setInitialLabel = (btn) => {
+    btn.replaceChildren(document.createElement('span'));
     btn.setAttribute('aria-label', LABEL);
     btn.setAttribute('title', LABEL);
-  }
-
-  function locate(root) {
-    const barEl = root.querySelector('plugin-action-bar');
-    const barSR = barEl && barEl.shadowRoot;
-    const publish = barSR && barSR.querySelector('sk-action-button.publish');
-    const group = barSR && (barSR.querySelector('.action-group.plugins-container') || publish?.parentNode || barSR);
-    return { barSR, publish, group };
-  }
+  };
 
   function ensureButton(root) {
-    const { barSR, publish, group } = locate(root);
-    if (!barSR || !group) return null;
-    const existing = barSR.querySelector('sk-action-button.send-review');
-    if (existing) return existing;
+    const bar = root.querySelector('plugin-action-bar')?.shadowRoot;
+    if (!bar) return null;
+    const publish = bar.querySelector('sk-action-button.publish');
+    const group = bar.querySelector('.action-group.plugins-container') || publish?.parentNode || bar;
 
-    // Prefer real constructor for exact styling
+    if (!group) return null;
+    let btn = bar.querySelector('sk-action-button.send-review');
+    if (btn) return btn;
+
     const Ctor = customElements.get('sk-action-button');
-    if (Ctor) {
-      try {
-        const btn = new Ctor();
-        btn.classList.add('send-review');
-        btn.dataset.action = 'send-for-review';
-        if (publish) {
-          [...publish.attributes].forEach(({ name, value }) => {
-            if (!['class', 'title', 'aria-label'].includes(name)) btn.setAttribute(name, value);
-          });
-        } else {
-          btn.setAttribute('quiet', ''); btn.setAttribute('dir', 'ltr'); btn.setAttribute('role', 'button'); btn.setAttribute('tabindex', '0');
-        }
-        setInitialLabel(btn);
-        (publish?.parentNode || group).insertBefore(btn, publish || null);
-        return btn;
-      } catch {}
-    }
-
-    // Fallback: clone Publish
+    btn = Ctor ? new Ctor() : document.createElement('sk-action-button');
+    btn.classList.add('send-review');
+    btn.dataset.action = 'send-for-review';
     if (publish) {
-      const clone = publish.cloneNode(true);
-      clone.classList.remove('publish', 'reload', 'edit');
-      clone.classList.add('send-review');
-      clone.dataset.action = 'send-for-review';
-      clone.removeAttribute('disabled');
-      clone.removeAttribute('aria-busy');
-      setInitialLabel(clone);
-      publish.parentNode.insertBefore(clone, publish);
-      return clone;
+      [...publish.attributes].forEach(({ name, value }) => {
+        if (!['class', 'title', 'aria-label'].includes(name)) btn.setAttribute(name, value);
+      });
+      publish.parentNode.insertBefore(btn, publish);
+    } else {
+      btn.setAttribute('quiet', '');
+      btn.setAttribute('role', 'button');
+      group.insertBefore(btn, null);
     }
-
-    // Fallback: create element
-    const el = document.createElement('sk-action-button');
-    el.classList.add('send-review');
-    el.dataset.action = 'send-for-review';
-    el.setAttribute('quiet', ''); el.setAttribute('dir', 'ltr'); el.setAttribute('role', 'button'); el.setAttribute('tabindex', '0');
-    setInitialLabel(el);
-    group.insertBefore(el, publish || null);
-    return el;
+    setInitialLabel(btn);
+    return btn;
   }
 
-  function getHost() { return document.querySelector('aem-sidekick, helix-sidekick'); }
-
   function attach() {
-    const host = getHost();
-    const root = host && host.shadowRoot;
+    const host = document.querySelector('aem-sidekick, helix-sidekick');
+    const root = host?.shadowRoot;
     if (!root) return;
 
-    // One-time delegated click handler inside the shadow root
     if (!root.__sfrDelegation) {
       root.__sfrDelegation = true;
       root.addEventListener('click', async (e) => {
-        const path = (e.composedPath && e.composedPath()) || [];
-        const hit = path.find((el) => el?.tagName === 'SK-ACTION-BUTTON' && el.classList?.contains('send-review'));
-        if (!hit) return;
-        if (hit.hasAttribute('aria-busy')) return; // avoid double-clicks during in-flight
+        const hit = e.composedPath().find(
+          (el) => el?.tagName === 'SK-ACTION-BUTTON' && el.classList.contains('send-review')
+        );
+        if (!hit || hit.hasAttribute('aria-busy')) return;
 
-        const webhook = resolveWebhook();
-        const ctx = getSidekickContext();
-        const payload = buildPayload(ctx);
-
-        // Minimal in-flight feedback (no persistence)
         hit.setAttribute('aria-busy', 'true');
         hit.setAttribute('disabled', '');
         try {
-          await postToWebhook(webhook, payload);
+          await postToWebhook(resolveWebhook(), buildPayload(getSidekickContext()));
           alert('Review request submitted.');
         } catch (err) {
           console.error('[SFR] webhook failed:', err);
@@ -404,28 +341,20 @@ function buildPayload(ctx) {
       }, { capture: true });
     }
 
-    // Insert button now or when the bar renders
     let btn = ensureButton(root);
     if (!btn) {
-      if (!customElements.get('sk-action-button')) {
-        customElements.whenDefined('sk-action-button').then(() => { btn = btn || ensureButton(root); });
-      }
-      const mo = new MutationObserver(() => { btn = btn || ensureButton(root); if (btn) mo.disconnect(); });
+      customElements.whenDefined('sk-action-button').then(() => { btn ||= ensureButton(root); });
+      const mo = new MutationObserver(() => { btn ||= ensureButton(root); if (btn) mo.disconnect(); });
       mo.observe(root, { childList: true, subtree: true });
     }
   }
 
   // Attach now and on readiness events
-  if (getHost()) attach();
+  if (document.querySelector('aem-sidekick, helix-sidekick')) attach();
   ['sidekick-ready', 'helix-sidekick-ready'].forEach((ev) => document.addEventListener(ev, attach));
-  if (customElements.whenDefined) {
-    customElements.whenDefined('aem-sidekick').then(attach).catch(() => {});
-    if (customElements.get('helix-sidekick')) customElements.whenDefined('helix-sidekick').then(attach).catch(() => {});
-  }
+  customElements.whenDefined('aem-sidekick').then(attach).catch(() => {});
+  if (customElements.get('helix-sidekick')) customElements.whenDefined('helix-sidekick').then(attach).catch(() => {});
 })();
-
-
-
 
 
 
