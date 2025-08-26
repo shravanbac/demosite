@@ -142,57 +142,68 @@ async function loadPage() {
   const LABEL = 'Send For Review';
 
   /** Resolve webhook URL from global, meta, or default */
-  const resolveWebhook = () =>
-    (typeof window.__SFR_WEBHOOK_URL === 'string' && window.__SFR_WEBHOOK_URL)
-      || document.querySelector('meta[name="sfr:webhook"]')?.content?.trim()
-      || DEFAULT_WEBHOOK;
+  const resolveWebhook = () => (
+    (typeof window.SFR_WEBHOOK_URL === 'string' && window.SFR_WEBHOOK_URL)
+    || document.querySelector('meta[name="sfr:webhook"]')?.content?.trim()
+    || DEFAULT_WEBHOOK
+  );
 
   /** Collect info about current page and sidekick */
   function getSidekickContext() {
-      const { host, pathname, href } = window.location;
-      let ref = '', site = '', org = '', env = host.includes('.aem.live') ? 'live' : 'page';
+    const { host, pathname, href } = window.location;
 
-      const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
-      if (m) [, ref, site, org, env] = m;
+    let ref = '';
+    let site = '';
+    let org = '';
+    let env = host.includes('.aem.live') ? 'live' : 'page';
 
-      const sk = (window.hlx?.sidekick)
-        || document.querySelector('aem-sidekick, helix-sidekick')?.sidekick
-        || {};
-  
-  // fallback from sidekick config if still missing
-  ref  ||= sk.ref  || sk.branch || sk.gitref || '';
-  site ||= sk.repo || sk.site   || '';
-  org  ||= sk.owner|| sk.org    || '';
+    const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
+    if (m) [, ref, site, org, env] = m;
 
+    const sk = (window.hlx?.sidekick)
+      || document.querySelector('aem-sidekick, helix-sidekick')?.sidekick
+      || {};
+
+    if (!ref) ref = sk.ref || sk.branch || sk.gitref || '';
+    if (!site) site = sk.repo || sk.site || '';
+    if (!org) org = sk.owner || sk.org || '';
 
     return {
-      ref, site, org, env,
+      ref,
+      site,
+      org,
+      env,
       path: (pathname || '/').replace(/^\//, ''),
       title: document.title || pathname || '/',
       url: href,
       host,
-      iso_now: new Date().toISOString()
+      isoNow: new Date().toISOString(),
     };
   }
 
   /** Construct the JSON object that will be sent to Fusion */
   function buildPayload(ctx) {
-    const { ref, site, org, host, path, iso_now } = ctx;
+    const {
+      ref, site, org, host, path, isoNow,
+    } = ctx;
+
     const hasRepo = ref && site && org;
     const cleanPath = path.replace(/^\/+/, '');
-    const name = (cleanPath.split('/').filter(Boolean).pop() || 'index').replace(/\.[^.]+$/, '') || 'index';
+    const name = (cleanPath.split('/').filter(Boolean).pop() || 'index')
+      .replace(/\.[^.]+$/, '') || 'index';
 
     // Try different sources to identify who clicked "Send For Review"
-    const userMeta     = document.querySelector('meta[name="sfr:user"]')?.content || undefined;
-    const userFromSk   = window.hlx?.sidekick?.user || undefined;
-    const userOverride = window.__SFR_USER || undefined;
+    const userMeta = document.querySelector('meta[name="sfr:user"]')?.content || undefined;
+    const userFromSk = window.hlx?.sidekick?.user || undefined;
+    const userOverride = window.SFR_USER || undefined;
 
-    // Pick first available value
-    const submittedBy = userOverride || userMeta || userFromSk || "anonymous";
+    const submittedBy = userOverride || userMeta || userFromSk || 'anonymous';
 
     const liveHost = hasRepo
       ? `${ref}--${site}--${org}.aem.live`
-      : host?.endsWith('.aem.page') ? host.replace('.aem.page', '.aem.live') : host || 'localhost';
+      : host?.endsWith('.aem.page')
+        ? host.replace('.aem.page', '.aem.live')
+        : host || 'localhost';
 
     const previewHost = hasRepo
       ? `${ref}--${site}--${org}.aem.page`
@@ -203,28 +214,30 @@ async function loadPage() {
       const out = {};
       document.head.querySelectorAll(`meta[property^="${prefix}"], meta[name^="${prefix}"]`)
         .forEach((m) => {
-          const key = (m.getAttribute('property') || m.getAttribute('name')).replace(`${prefix}:`, '');
+          const key = (m.getAttribute('property') || m.getAttribute('name'))
+            .replace(`${prefix}:`, '');
           out[key] = m.content;
         });
       return Object.keys(out).length ? out : undefined;
     };
 
     const payload = {
-      // required
       title: ctx.title,
       url: `https://${liveHost}/${cleanPath}`,
       name,
-      publishedDate: iso_now,
+      publishedDate: isoNow,
       submittedBy,
 
-      // context
       path: `/${cleanPath}`,
       previewUrl: `https://${previewHost}/${cleanPath}`,
       liveUrl: `https://${liveHost}/${cleanPath}`,
-      host, env: ctx.env, org, site, ref,
+      host,
+      env: ctx.env,
+      org,
+      site,
+      ref,
       source: 'DA.live',
 
-      // page meta
       lang: document.documentElement.lang || undefined,
       dir: document.documentElement.dir || undefined,
       canonical: document.querySelector('link[rel="canonical"]')?.href,
@@ -235,12 +248,10 @@ async function loadPage() {
         og: metas('og'),
       },
 
-      // content preview
       headings: Array.from(document.querySelectorAll('h1, h2, h3'))
         .slice(0, 6)
-        .map(h => ({ level: h.tagName, text: h.textContent.trim() })) || undefined,
+        .map((h) => ({ level: h.tagName, text: h.textContent.trim() })) || undefined,
 
-      // audit info
       analytics: {
         referrer: document.referrer || undefined,
         userAgent: navigator.userAgent || undefined,
@@ -249,10 +260,9 @@ async function loadPage() {
         viewport: { width: window.innerWidth, height: window.innerHeight },
       },
 
-      idempotencyKey: `${cleanPath}#${iso_now}`,
+      idempotencyKey: `${cleanPath}#${isoNow}`,
     };
 
-    // prune empty objects
     const prune = (obj) => {
       Object.keys(obj).forEach((k) => {
         const v = obj[k];
@@ -271,12 +281,13 @@ async function loadPage() {
   async function postToWebhook(webhook, payload) {
     const res = await fetch(webhook, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
       mode: 'cors',
       body: JSON.stringify(payload),
     });
     const text = await res.text();
-    let meta; try { meta = text ? JSON.parse(text) : null; } catch {}
+    let meta;
+    try { meta = text ? JSON.parse(text) : null; } catch (e) { /* ignore */ }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}${meta?.message ? ` – ${meta.message}` : text ? ` – ${text}` : ''}`);
     }
@@ -295,7 +306,9 @@ async function loadPage() {
     const bar = root.querySelector('plugin-action-bar')?.shadowRoot;
     if (!bar) return null;
     const publish = bar.querySelector('sk-action-button.publish');
-    const group = bar.querySelector('.action-group.plugins-container') || publish?.parentNode || bar;
+    const group = bar.querySelector('.action-group.plugins-container')
+      || publish?.parentNode
+      || bar;
 
     if (!group) return null;
     let btn = bar.querySelector('sk-action-button.send-review');
@@ -325,11 +338,11 @@ async function loadPage() {
     const root = host?.shadowRoot;
     if (!root) return;
 
-    if (!root.__sfrDelegation) {
-      root.__sfrDelegation = true;
+    if (!root.sfrDelegation) {
+      root.sfrDelegation = true;
       root.addEventListener('click', async (e) => {
         const hit = e.composedPath().find(
-          (el) => el?.tagName === 'SK-ACTION-BUTTON' && el.classList.contains('send-review')
+          (el) => el?.tagName === 'SK-ACTION-BUTTON' && el.classList.contains('send-review'),
         );
         if (!hit || hit.hasAttribute('aria-busy')) return;
 
@@ -337,8 +350,10 @@ async function loadPage() {
         hit.setAttribute('disabled', '');
         try {
           await postToWebhook(resolveWebhook(), buildPayload(getSidekickContext()));
+          // eslint-disable-next-line no-alert
           alert('Review request submitted.');
         } catch (err) {
+          // eslint-disable-next-line no-alert
           alert(`Send For Review failed: ${err.message}`);
         } finally {
           hit.removeAttribute('aria-busy');
@@ -349,8 +364,11 @@ async function loadPage() {
 
     let btn = ensureButton(root);
     if (!btn) {
-      customElements.whenDefined('sk-action-button').then(() => { btn ||= ensureButton(root); });
-      const mo = new MutationObserver(() => { btn ||= ensureButton(root); if (btn) mo.disconnect(); });
+      customElements.whenDefined('sk-action-button').then(() => { if (!btn) btn = ensureButton(root); });
+      const mo = new MutationObserver(() => {
+        if (!btn) btn = ensureButton(root);
+        if (btn) mo.disconnect();
+      });
       mo.observe(root, { childList: true, subtree: true });
     }
   }
@@ -359,7 +377,9 @@ async function loadPage() {
   if (document.querySelector('aem-sidekick, helix-sidekick')) attach();
   ['sidekick-ready', 'helix-sidekick-ready'].forEach((ev) => document.addEventListener(ev, attach));
   customElements.whenDefined('aem-sidekick').then(attach).catch(() => {});
-  if (customElements.get('helix-sidekick')) customElements.whenDefined('helix-sidekick').then(attach).catch(() => {});
+  if (customElements.get('helix-sidekick')) {
+    customElements.whenDefined('helix-sidekick').then(attach).catch(() => {});
+  }
 })();
 
 loadPage();
