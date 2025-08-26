@@ -362,6 +362,4 @@ async function loadPage() {
   if (customElements.get('helix-sidekick')) customElements.whenDefined('helix-sidekick').then(attach).catch(() => {});
 })();
 
-
-
 loadPage();
