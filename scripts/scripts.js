@@ -126,7 +126,6 @@ async function loadPage() {
   loadDelayed();
 }
 
-
 /* -------------------------------------------------------------------------- */
 /*     Sidekick: "Send For Review" — plain POST (no TTL, no polling, no LS)   */
 /* -------------------------------------------------------------------------- */
@@ -139,8 +138,8 @@ async function loadPage() {
 */
 
 (() => {
-  const DEFAULT_WEBHOOK = "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd";
-  const LABEL = "Send For Review";
+  const DEFAULT_WEBHOOK = 'https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd';
+  const LABEL = 'Send For Review';
 
   /** Resolve webhook URL from global, meta, or default */
   const resolveWebhook = () =>
@@ -150,15 +149,15 @@ async function loadPage() {
 
   /** Collect info about current page and sidekick */
   function getSidekickContext() {
-  const { host, pathname, href } = window.location;
-  let ref = "", site = "", org = "", env = host.includes('.aem.live') ? "live" : "page";
+      const { host, pathname, href } = window.location;
+      let ref = '', site = '', org = '', env = host.includes('.aem.live') ? 'live' : 'page';
 
-  const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
-  if (m) [, ref, site, org, env] = m;
+      const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
+      if (m) [, ref, site, org, env] = m;
 
-  const sk = (window.hlx?.sidekick)
-    || document.querySelector('aem-sidekick, helix-sidekick')?.sidekick
-    || {};
+      const sk = (window.hlx?.sidekick)
+        || document.querySelector('aem-sidekick, helix-sidekick')?.sidekick
+        || {};
   
   // fallback from sidekick config if still missing
   ref  ||= sk.ref  || sk.branch || sk.gitref || '';
@@ -340,7 +339,6 @@ async function loadPage() {
           await postToWebhook(resolveWebhook(), buildPayload(getSidekickContext()));
           alert('Review request submitted.');
         } catch (err) {
-          console.error('[SFR] webhook failed:', err);
           alert(`Send For Review failed: ${err.message}`);
         } finally {
           hit.removeAttribute('aria-busy');
