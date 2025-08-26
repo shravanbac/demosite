@@ -131,17 +131,11 @@ async function loadPage() {
 /*     Sidekick: "Send For Review" — plain POST (no TTL, no polling, no LS)   */
 /* -------------------------------------------------------------------------- */
 /*
-  Drop-in usage
+  usage
   =============
-  - Include this IIFE after the Sidekick loads (end of your main JS is fine).
   - It injects a "Send For Review" button before Publish and performs a
     single POST to your Fusion webhook when clicked.
   - No persistence, no status polling, no timers — just the POST.
-
-  Configure the webhook (first match wins):
-    1) window.__SFR_WEBHOOK_URL = "https://hook.fusion.adobe.com/xxxx";
-    2) <meta name="sfr:webhook" content="https://hook.fusion.adobe.com/xxxx">
-    3) DEFAULT_WEBHOOK below.
 */
 
 (() => {
@@ -154,19 +148,23 @@ async function loadPage() {
       || document.querySelector('meta[name="sfr:webhook"]')?.content?.trim()
       || DEFAULT_WEBHOOK;
 
-  /** Extract context from Sidekick and location */
+  /** Collect info about current page and sidekick */
   function getSidekickContext() {
-    const { host, pathname, href } = window.location;
-    let [ref = "", site = "", org = "", env = host.includes('.aem.live') ? 'live' : 'page'] =
-      host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/) || [];
+  const { host, pathname, href } = window.location;
+  let ref = "", site = "", org = "", env = host.includes('.aem.live') ? "live" : "page";
 
-    const sk = (window.hlx?.sidekick)
-      || document.querySelector('aem-sidekick, helix-sidekick')?.sidekick
-      || {};
+  const m = host.match(/^([^-]+)--([^-]+)--([^.]+)\.aem\.(page|live)$/);
+  if (m) [, ref, site, org, env] = m;
 
-    ref  ||= sk.ref  || sk.branch || sk.gitref || '';
-    site ||= sk.repo || sk.site   || '';
-    org  ||= sk.owner|| sk.org    || '';
+  const sk = (window.hlx?.sidekick)
+    || document.querySelector('aem-sidekick, helix-sidekick')?.sidekick
+    || {};
+  
+  // fallback from sidekick config if still missing
+  ref  ||= sk.ref  || sk.branch || sk.gitref || '';
+  site ||= sk.repo || sk.site   || '';
+  org  ||= sk.owner|| sk.org    || '';
+
 
     return {
       ref, site, org, env,
@@ -178,7 +176,7 @@ async function loadPage() {
     };
   }
 
-  /** Build payload expected by Fusion */
+  /** Construct the JSON object that will be sent to Fusion */
   function buildPayload(ctx) {
     const { ref, site, org, host, path, iso_now } = ctx;
     const hasRepo = ref && site && org;
@@ -227,7 +225,6 @@ async function loadPage() {
         keywords: qMeta('meta[name="keywords"]'),
         author: qMeta('meta[name="author"]'),
         og: metas('og'),
-        twitter: metas('twitter'),
       },
 
       // content preview
@@ -262,7 +259,7 @@ async function loadPage() {
     return prune(payload);
   }
 
-  /** POST helper */
+  /** Send the payload to the webhook */
   async function postToWebhook(webhook, payload) {
     const res = await fetch(webhook, {
       method: 'POST',
@@ -278,13 +275,14 @@ async function loadPage() {
     return meta || {};
   }
 
-  /** UI helpers */
+  /** Initialize the button label and accessibility attributes */
   const setInitialLabel = (btn) => {
     btn.replaceChildren(document.createElement('span'));
     btn.setAttribute('aria-label', LABEL);
     btn.setAttribute('title', LABEL);
   };
 
+  /** Insert the Send For Review button into the Sidekick UI */
   function ensureButton(root) {
     const bar = root.querySelector('plugin-action-bar')?.shadowRoot;
     if (!bar) return null;
@@ -313,6 +311,7 @@ async function loadPage() {
     return btn;
   }
 
+  /** Attach event listeners and insert the button when Sidekick is ready */
   function attach() {
     const host = document.querySelector('aem-sidekick, helix-sidekick');
     const root = host?.shadowRoot;
