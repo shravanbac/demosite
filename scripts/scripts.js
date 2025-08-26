@@ -183,6 +183,14 @@ async function loadPage() {
     const cleanPath = path.replace(/^\/+/, '');
     const name = (cleanPath.split('/').filter(Boolean).pop() || 'index').replace(/\.[^.]+$/, '') || 'index';
 
+    // Try different sources to identify who clicked "Send For Review"
+    const userMeta     = document.querySelector('meta[name="sfr:user"]')?.content || undefined;
+    const userFromSk   = window.hlx?.sidekick?.user || undefined;
+    const userOverride = window.__SFR_USER || undefined;
+
+    // Pick first available value
+    const submittedBy = userOverride || userMeta || userFromSk || "anonymous";
+
     const liveHost = hasRepo
       ? `${ref}--${site}--${org}.aem.live`
       : host?.endsWith('.aem.page') ? host.replace('.aem.page', '.aem.live') : host || 'localhost';
@@ -208,6 +216,7 @@ async function loadPage() {
       url: `https://${liveHost}/${cleanPath}`,
       name,
       publishedDate: iso_now,
+      submittedBy,
 
       // context
       path: `/${cleanPath}`,
