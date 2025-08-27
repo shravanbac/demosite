@@ -12,6 +12,7 @@ import {
   loadSections,
   loadCSS,
 } from './aem.js';
+import '../tools/library/send-for-review-library.js';
 
 /**
  * Builds hero block and prepends to main in a new section.
