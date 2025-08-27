@@ -200,11 +200,13 @@ async function loadPage() {
 
     const submittedBy = userOverride || userMeta || userFromSk || 'anonymous';
 
-    const liveHost = hasRepo
-      ? `${ref}--${site}--${org}.aem.live`
-      : host?.endsWith('.aem.page')
-        ? host.replace('.aem.page', '.aem.live')
-        : host || 'localhost';
+    function resolveLiveHost() {
+      if (hasRepo) return `${ref}--${site}--${org}.aem.live`;
+      if (host?.endsWith('.aem.page')) return host.replace('.aem.page', '.aem.live');
+      return host || 'localhost';
+    }
+
+    const liveHost = resolveLiveHost();
 
     const previewHost = hasRepo
       ? `${ref}--${site}--${org}.aem.page`
@@ -290,8 +292,15 @@ async function loadPage() {
     let meta;
     try { meta = text ? JSON.parse(text) : null; } catch (e) { /* ignore */ }
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}${meta?.message ? ` – ${meta.message}` : text ? ` – ${text}` : ''}`);
+      let detail = '';
+      if (meta?.message) {
+        detail = ` – ${meta.message}`;
+      } else if (text) {
+        detail = ` – ${text}`;
+      }
+      throw new Error(`HTTP ${res.status}${detail}`);
     }
+
     return meta || {};
   }
 

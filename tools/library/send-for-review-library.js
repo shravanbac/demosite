@@ -35,8 +35,10 @@ function addSendForReviewToLibrary() {
           body: JSON.stringify(payload),
         },
       );
+      // eslint-disable-next-line no-alert
       alert('Review request submitted.');
     } catch (err) {
+      // eslint-disable-next-line no-alert
       alert(`Send For Review failed: ${err.message}`);
     }
   });
