@@ -1,5 +1,4 @@
 (() => {
-  document.addEventListener('publish-for-review', () => {
-    window.location.href = 'https://google.com';
-  });
+  // eslint-disable-next-line no-alert
+  alert('✅ publish-for-review.js loaded');
 })();
