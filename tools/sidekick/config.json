@@ -6,7 +6,8 @@
       "title": "Publish For Review",
       "event": "publish-for-review",
       "pinned": true,
-      "environments": ["dev","preview","live","prod"]
+      "environments": ["dev","preview"]
     }
   ]
 }
+
