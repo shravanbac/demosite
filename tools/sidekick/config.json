@@ -4,9 +4,9 @@
     {
       "id": "publish-review",
       "title": "Publish For Review in WF",
-      "url": "https://google.com",
+      "url": "https://www.google.com",
       "pinned": true,
-      "environments": ["localhost", "dev", "preview"]
+      "environments": ["preview"]
     }
   ]
 }
