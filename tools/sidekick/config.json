@@ -4,10 +4,9 @@
     {
       "id": "publish-review",
       "title": "Publish For Review in WF",
-      "event": "publish-for-review",
+      "url": "https://google.com",
       "pinned": true,
-      "environments": ["localhost","dev","preview"],
-      "include": ["/scripts/publish-for-review.js"]
+      "environments": ["localhost", "dev", "preview"]
     }
   ]
 }
