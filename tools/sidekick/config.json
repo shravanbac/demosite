@@ -3,11 +3,12 @@
   "plugins": [
     {
       "id": "publish-review",
-      "title": "Publish For Review",
+      "title": "Publish For Review in WF",
       "event": "publish-for-review",
       "pinned": true,
       "environments": ["dev","preview"]
     }
   ]
 }
+
 
