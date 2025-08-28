@@ -6,9 +6,11 @@
       "title": "Publish For Review in WF",
       "event": "publish-for-review",
       "pinned": true,
-      "environments": ["dev","preview"]
+      "environments": ["dev","preview"],
+      "include": ["/tools/sidekick/publish-for-review.js"]
     }
   ]
 }
+
 
 
