@@ -7,6 +7,13 @@
       "url": "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd",
       "pinned": true,
       "environments": ["localhost", "dev", "preview"]
+    },
+    {
+      "id": "send-review",
+      "title": "Send For Review in WF",
+      "url": "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd",
+      "pinned": true,
+      "environments": ["localhost", "dev", "preview"]
     }
   ]
 }
