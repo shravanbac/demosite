@@ -4,7 +4,7 @@
       url: window.location.href,
       title: document.title,
       submittedBy: 'shravan',
-      isoNow: new Date().toISOString()
+      isoNow: new Date().toISOString(),
     };
 
     try {
@@ -13,8 +13,8 @@
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        }
+          body: JSON.stringify(payload),
+        },
       );
 
       if (res.ok) {
@@ -22,11 +22,11 @@
         alert('✅ Page sent to Workfront Fusion successfully');
       } else {
         // eslint-disable-next-line no-alert
-        alert('❌ Workfront Fusion webhook failed: ' + res.status);
+        alert('❌ Workfront Fusion webhook failed: ');
       }
     } catch (err) {
       // eslint-disable-next-line no-alert
-      alert('❌ Error sending webhook: ' + err.message);
+      alert('❌ Error sending webhook: ');
     }
   });
 })();
