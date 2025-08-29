@@ -7,7 +7,7 @@
       "event": "publish-for-review",
       "pinned": true,
       "environments": ["localhost", "dev", "preview"],
-      "include": ["/tools/sidekick/publish-for-review.js?v=20250301"]
+      "include": ["/blocks/review/publish-for-review.js?v=20250302"]
     }
   ]
 }
