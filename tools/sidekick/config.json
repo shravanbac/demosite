@@ -7,8 +7,9 @@
       "event": "publish-for-review",
       "pinned": true,
       "environments": ["localhost", "dev", "preview"],
-      "include": ["/scripts/publish-for-review.js?v=1.0"]
+      "include": ["/scripts/publish-for-review.js?v=20250301"]
     }
   ]
 }
+
 
