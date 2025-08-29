@@ -1,13 +1,3 @@
 {
-  "project": "Demo Site",
-  "plugins": [
-    {
-      "id": "publish-review",
-      "title": "Publish For Review in WF",
-      "event": "publish-for-review",
-      "pinned": true,
-      "environments": ["localhost", "dev", "preview"],
-      "include": ["/blocks/review/publish-for-review.js?v=20250302"]
-    }
-  ]
+  "project": "Demo Site"
 }
