@@ -2,18 +2,10 @@
   "project": "Demo Site",
   "plugins": [
     {
-      "id": "publish-review",
-      "title": "Publish For Review in WF",
-      "url": "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd",
-      "pinned": true,
-      "environments": ["localhost", "dev", "preview"]
-    },
-    {
-      "id": "send-review",
+      "id": "send-for-review",
       "title": "Send For Review in WF",
       "url": "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd",
-      "pinned": true,
       "environments": ["localhost", "dev", "preview"]
-    }
+    },
   ]
 }
