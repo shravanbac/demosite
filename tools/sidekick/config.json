@@ -4,13 +4,9 @@
     {
       "id": "publish-review",
       "title": "Publish For Review in WF",
-      "event": "publish-for-review",
+      "url": "https://hook.app.workfrontfusion.com/3o5lrlkstfbbrspi35hh0y3cmjkk4gdd",
       "pinned": true,
-      "environments": ["localhost", "dev", "preview"],
-      "include": ["/tools/sidekick/publish-for-review.js?v=20250301"]
+      "environments": ["localhost", "dev", "preview"]
     }
   ]
 }
-
-
-
