@@ -1,4 +1,2 @@
 mountpoints:
-  /:
-    url: https://content.da.live/shravanbac/demosite/
-    type: markup
+ /: https://drive.google.com/drive/u/0/folders/1MGzOt7ubUh3gu7zhZIPb7R7dyRzG371j
